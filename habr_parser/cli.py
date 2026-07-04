@@ -1,8 +1,9 @@
 """CLI: оркестрация прогона (SPEC §9, §10).
 
 Команды первой версии:
-  urls <file>   — распарсить статьи по списку URL (таблица urls.md)
-  reindex       — пересобрать INDEX.md и corpus.jsonl из имеющихся файлов
+  urls <file>       — распарсить статьи по списку URL (таблица urls.md)
+  author <username> — скачать все статьи автора через listing API
+  reindex           — пересобрать INDEX.md и corpus.jsonl из имеющихся файлов
 """
 
 from __future__ import annotations
@@ -73,8 +74,33 @@ def run_urls(urls_file: str, cfg: dict, force: bool = False) -> int:
     if not ids:
         print(f"В {urls_file} не найдено ссылок на статьи habr.com", file=sys.stderr)
         return 1
+    return _process_ids(ids, cfg, force=force)
 
+
+def run_author(username: str, cfg: dict, force: bool = False) -> int:
     client = HabrClient(user_agent=cfg["user_agent"], delay_seconds=cfg["delay_seconds"])
+    print(f"Получаю список статей автора {username}…")
+    try:
+        ids = client.get_author_ids(username)
+    except ArticleUnavailable as exc:
+        print(f"Автор {username} недоступен — {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001 — сбой листинга не должен падать трейсбеком
+        print(f"Не удалось получить список статей {username}: {exc}", file=sys.stderr)
+        return 1
+    if not ids:
+        print(f"У автора {username} не найдено публичных статей", file=sys.stderr)
+        return 1
+    print(f"Найдено статей у {username}: {len(ids)}")
+    # Тот же клиент передаём дальше — сохраняется троттлинг между листингом и статьями.
+    return _process_ids(ids, cfg, force=force, client=client)
+
+
+def _process_ids(ids: list[str], cfg: dict, *, force: bool = False,
+                 client: HabrClient | None = None) -> int:
+    client = client or HabrClient(
+        user_agent=cfg["user_agent"], delay_seconds=cfg["delay_seconds"]
+    )
     corpus = Corpus(cfg["output_dir"], cfg["me"])
     state = RunState(cfg["output_dir"])
     existing: set[str] = set()
@@ -151,6 +177,10 @@ def main(argv: list[str] | None = None) -> int:
     p_urls.add_argument("file", help="файл со ссылками (напр. urls.md)")
     p_urls.add_argument("--force", action="store_true", help="перекачать даже обработанные")
 
+    p_author = sub.add_parser("author", help="скачать все статьи автора")
+    p_author.add_argument("username", help="alias автора на Хабре (напр. VitTurov)")
+    p_author.add_argument("--force", action="store_true", help="перекачать даже обработанные")
+
     sub.add_parser("reindex", help="пересобрать INDEX.md и corpus.jsonl")
 
     args = parser.parse_args(argv)
@@ -158,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "urls":
         return run_urls(args.file, cfg, force=args.force)
+    if args.command == "author":
+        return run_author(args.username, cfg, force=args.force)
     if args.command == "reindex":
         return run_reindex(cfg)
     return 1

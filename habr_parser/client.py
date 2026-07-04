@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from urllib.parse import quote
 
 API_BASE = "https://habr.com/kek/v2/articles"
 
@@ -81,3 +82,27 @@ class HabrClient:
     def get_comments(self, article_id: str | int) -> dict:
         """Дерево комментариев статьи."""
         return self._get_json(f"{API_BASE}/{article_id}/comments/?fl=ru&hl=ru")
+
+    def get_author_ids(self, username: str) -> list[str]:
+        """Все id публикаций автора: проходим постранично по listing-эндпоинту.
+
+        Ответ отдаёт только id и лёгкую мету (`publicationRefs`) — тело статьи
+        приходит уже из get_article, поэтому здесь берём лишь список id.
+        """
+        seen: set[str] = set()
+        ids: list[str] = []
+        page = 1
+        while True:
+            data = self._get_json(
+                f"{API_BASE}/?user={quote(username)}&page={page}&fl=ru&hl=ru"
+            )
+            for raw in data.get("publicationIds") or []:
+                aid = str(raw)
+                if aid not in seen:  # страховка от пересечений между страницами
+                    seen.add(aid)
+                    ids.append(aid)
+            pages = data.get("pagesCount") or 1
+            if page >= pages:
+                break
+            page += 1
+        return ids
