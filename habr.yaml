@@ -1,0 +1,7 @@
+# Конфиг habr-corpus-parser (см. SPEC.md §10)
+me: VitTurov                 # свой alias на Хабре → статьи идут в mine/
+output_dir: corpus
+delay_seconds: 2.5           # пауза между запросами (2–3 с, правило проекта)
+user_agent: "habr-corpus-parser (contact: inforobot.vit@gmail.com)"
+download_images: false
+include_comments: true
