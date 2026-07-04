@@ -4,6 +4,7 @@
   urls <file>       — распарсить статьи по списку URL (таблица urls.md)
   author <username> — скачать все статьи автора через listing API
   reindex           — пересобрать INDEX.md и corpus.jsonl из имеющихся файлов
+  validate          — проверить полноту корпуса (обязательные поля не пусты)
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from .client import ArticleUnavailable, HabrClient
-from .corpus import Corpus, RunState
+from .corpus import REQUIRED_FIELDS, Corpus, RunState, check_completeness
 from .render import Article, render_article, render_comments
 
 MSK = timezone(timedelta(hours=3))
@@ -161,6 +162,41 @@ def _meta_for_index(a: Article) -> dict:
     }
 
 
+def run_validate(cfg: dict) -> int:
+    """Проверка полноты: у каждой статьи должны быть непустыми title, дата
+    публикации, хабы, теги, рейтинг, закладки и тело. Пропуски логируются явно
+    в corpus/validation.log (SPEC — completeness check)."""
+    root = Path(cfg["output_dir"])
+    reports = check_completeness(root)
+    if not reports:
+        print(f"В {root}/ не найдено статей для проверки")
+        return 0
+
+    incomplete = [r for r in reports if r["missing"]]
+    print(f"Обязательные поля: {', '.join(REQUIRED_FIELDS)}, body")
+    print(f"Проверено статей: {len(reports)}\n")
+
+    for r in reports:
+        if r["missing"]:
+            print(f"❌ {r['path']} — ПУСТО: {', '.join(r['missing'])}")
+        else:
+            print(f"✅ {r['path']}")
+
+    log_path = root / "validation.log"
+    stamp = _now_iso()
+    if incomplete:
+        with log_path.open("a", encoding="utf-8") as f:
+            for r in incomplete:
+                for field in r["missing"]:
+                    f.write(f"{stamp}\tmissing\t{r['path']}\t{field}\n")
+        print(f"\nНеполных статей: {len(incomplete)} из {len(reports)}. "
+              f"Пропуски записаны в {log_path}")
+        return 1
+
+    print(f"\nВсе {len(reports)} статей полны — пустых полей нет.")
+    return 0
+
+
 def run_reindex(cfg: dict) -> int:
     corpus = Corpus(cfg["output_dir"], cfg["me"])
     corpus.write_indexes()
@@ -183,6 +219,8 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("reindex", help="пересобрать INDEX.md и corpus.jsonl")
 
+    sub.add_parser("validate", help="проверить полноту корпуса (обязательные поля)")
+
     args = parser.parse_args(argv)
     cfg = load_config(args.config)
 
@@ -192,6 +230,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_author(args.username, cfg, force=args.force)
     if args.command == "reindex":
         return run_reindex(cfg)
+    if args.command == "validate":
+        return run_validate(cfg)
     return 1
 
 

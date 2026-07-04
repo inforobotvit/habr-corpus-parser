@@ -183,3 +183,49 @@ def _parse_flow_list(val: str) -> list[str]:
         return []
     inner = val.strip("[]")
     return [item.strip().strip('"') for item in inner.split(",") if item.strip()]
+
+
+# ---- проверка полноты корпуса (completeness check) ------------------------
+
+# Поля, которые обязаны быть непустыми в каждой статье. Тело (body) проверяется
+# отдельно — оно живёт не во frontmatter, а в содержимом файла.
+REQUIRED_FIELDS = ("title", "published", "hubs", "tags", "rating", "bookmarks")
+
+
+def _is_blank(value) -> bool:
+    """Пусто = None / пустая строка / пустой список. Числовой 0 (и отрицательный
+    рейтинг) — валидное значение, не пропуск."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    if isinstance(value, (list, tuple, dict)):
+        return len(value) == 0
+    return False
+
+
+def _read_body(path: Path) -> str:
+    """Содержимое статьи после закрывающего `---` frontmatter."""
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        return text.strip()
+    parts = text.split("---", 2)
+    return parts[2].strip() if len(parts) == 3 else ""
+
+
+def check_completeness(root: str | Path) -> list[dict]:
+    """Проверяет каждую статью корпуса на непустые обязательные поля и тело.
+
+    Возвращает список записей вида {"path", "missing"} — по одной на статью;
+    missing пуст, если пропусков нет. Порядок — по пути (детерминированный)."""
+    root = Path(root)
+    reports: list[dict] = []
+    for md in sorted(root.glob("*/*.md")):
+        if md.name.endswith(".comments.md"):
+            continue
+        meta = _read_frontmatter(md, root)
+        missing = [f for f in REQUIRED_FIELDS if _is_blank(meta.get(f))]
+        if _is_blank(_read_body(md)):
+            missing.append("body")
+        reports.append({"path": meta["_path"], "missing": missing})
+    return reports
