@@ -220,3 +220,5 @@ __marimo__/
 # Parser output (not for the repo)
 corpus/
 logs/
+.DS_Store
+заметки-прогонов.md
